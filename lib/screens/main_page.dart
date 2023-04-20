@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:disnote/assets/circular_box.dart';
 import 'package:disnote/other/constants.dart';
 import 'package:disnote/services/sql_helper.dart';
@@ -12,9 +14,10 @@ class MainPage extends StatefulWidget {
 
 class HomePageState extends State<MainPage> {
   // All journals
-
   List<Map<String, dynamic>> _journals = [];
-
+  List<Map<String, dynamic>> backupJournal = [];
+  String titleSearchQuery = "";
+  bool filter = false;
   bool _isLoading = true;
   // This function is used to fetch all data from the database
   void _refreshJournals() async {
@@ -22,7 +25,30 @@ class HomePageState extends State<MainPage> {
     setState(() {
       _journals = data;
       _isLoading = false;
+      backupJournal = _journals;
     });
+  }
+
+  Future<http.Response> postWebhook(String title, String content) {
+    if (title == "") {
+      title = "noTitleFound";
+    }
+    if (content == "") {
+      content = "noContentFound";
+    }
+    Map data = {
+      "embeds": [
+        {"title": title, "description": content}
+      ]
+    };
+    return http.post(
+      Uri.parse(
+          'https://discord.com/api/webhooks/1095084147216765098/evSEDQkNU2okmrPbmIPwlZrwc75GdCANt5tBbT8rm1jfZyVxcazhnzl_IQ6xXaPN2ezd'),
+      headers: <String, String>{
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: json.encode(data),
+    );
   }
 
   @override
@@ -33,9 +59,79 @@ class HomePageState extends State<MainPage> {
 
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
+  final TextEditingController _titleSearchController = TextEditingController();
 
-  // This function will be triggered when the floating button is pressed
-  // It will also be triggered when you want to update an item
+  void askTitlePrompt() async {
+    showModalBottomSheet(
+        context: context,
+        elevation: 5,
+        isScrollControlled: true,
+        builder: (_) {
+          return Container(
+            color: kBackgroundColor,
+            padding: EdgeInsets.only(
+              top: 15,
+              left: 15,
+              right: 15,
+              // this will prevent the soft keyboard from covering the text fields
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const SizedBox(
+                  height: 30,
+                ),
+                TextField(
+                  style: const TextStyle(
+                    color: kIconColor,
+                    fontSize: 17,
+                  ),
+                  controller: _titleSearchController,
+                  decoration: const InputDecoration(
+                    hintText: 'Title',
+                    hintStyle: TextStyle(
+                      color: kIconColor,
+                      fontSize: 17,
+                    ),
+                  ),
+                ),
+                const SizedBox(
+                  height: 20,
+                ),
+                ElevatedButton(
+                  style: ButtonStyle(
+                    backgroundColor: MaterialStateProperty.all(kBoxColor),
+                  ),
+                  onPressed: () {
+                    _journals = backupJournal;
+                    titleSearchQuery = _titleSearchController.text;
+                    _titleSearchController.text = '';
+                    _journals = _journals
+                        .where((element) => element['title']
+                            .toString()
+                            .toLowerCase()
+                            .contains(titleSearchQuery))
+                        .toList();
+                    setState(() {
+                      filter = true;
+                    });
+                    // Close the bottom sheet
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                  },
+                  child: const Text(
+                    'Search',
+                    style: TextStyle(
+                      color: kTextColor,
+                    ),
+                  ),
+                )
+              ],
+            ),
+          );
+        });
+  }
 
   void _showForm(int? id) async {
     if (id != null) {
@@ -160,12 +256,32 @@ class HomePageState extends State<MainPage> {
     return Scaffold(
       backgroundColor: kBackgroundColor,
       appBar: AppBar(
-        title: const Center(
-          child: Text(
-            'Disnote',
-            style: TextStyle(
-              color: kTextColor,
-            ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () {
+              askTitlePrompt();
+            },
+            icon: const Icon(Icons.search),
+          ),
+          filter
+              ? IconButton(
+                  onPressed: () {
+                    _refreshJournals();
+                    setState(() {
+                      filter = false;
+                      titleSearchQuery = "";
+                    });
+                  },
+                  icon: const Icon(Icons.close),
+                )
+              : Container(),
+        ],
+        title: const Text(
+          'Disnote',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: kTextColor,
           ),
         ),
         backgroundColor: kBackgroundColor,
@@ -215,8 +331,6 @@ class HomePageState extends State<MainPage> {
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
                           IconButton(
-                            splashColor: Colors.transparent,
-                            highlightColor: Colors.transparent,
                             icon: const Icon(
                               Icons.edit,
                               color: kIconColor,
@@ -228,14 +342,24 @@ class HomePageState extends State<MainPage> {
                             },
                           ),
                           IconButton(
-                            splashColor: Colors.transparent,
-                            highlightColor: Colors.transparent,
                             icon: const Icon(
                               Icons.delete,
                               color: kIconColor,
                             ),
                             onPressed: () {
                               _deleteItem(_journals[index]['id']);
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.upload,
+                              color: kIconColor,
+                            ),
+                            onPressed: () async {
+                              var res = await postWebhook(
+                                  _journals[index]["title"],
+                                  _journals[index]["content"]);
+                              debugPrint(res.statusCode.toString());
                             },
                           ),
                         ],
